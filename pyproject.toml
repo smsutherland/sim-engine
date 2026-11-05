@@ -1,0 +1,16 @@
+[project]
+name = "sim-engine"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Sagan Sutherland", email = "sagan.sutherland@uconn.edu" }
+]
+dependencies = []
+
+[project.scripts]
+sim-engine = "sim_engine:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

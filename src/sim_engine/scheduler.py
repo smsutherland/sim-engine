@@ -10,6 +10,7 @@ from sim_engine.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
+MAX_JOBS = 100
 
 @dataclass()
 class SlurmSpec:
@@ -57,8 +58,9 @@ class Scheduler:
     def run(self):
         self.check()
 
+        n_jobs = 0
         had_task = True
-        while True:
+        while n_jobs < MAX_JOBS:
             if not had_task:
                 # We sleep if the previous loop iteration didn't submit a task.
                 # If it did, we'll try again just in case we can submit another one right away.
@@ -92,6 +94,7 @@ class Scheduler:
             LOGGER.info(f"Starting task {next_task} on nodes {hostnames_to_run_on}")
             next_task.submit(hostnames_to_run_on)
             had_task = True
+            n_jobs += 1
 
     def check(self):
         cpus = sum(self.slurm.cpus_per_node)

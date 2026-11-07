@@ -3,13 +3,11 @@ name = "sim-engine"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Sagan Sutherland", email = "sagan.sutherland@uconn.edu" }
+authors = [{ name = "Sagan Sutherland", email = "sagan.sutherland@uconn.edu" }]
+requires-python = ">=3.11"
+dependencies = [
+    "mpi4py>=4.1.2",
 ]
-dependencies = []
-
-[project.scripts]
-sim-engine = "sim_engine:main"
 
 [build-system]
 requires = ["hatchling"]

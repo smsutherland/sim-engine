@@ -6,11 +6,11 @@ import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from sim_engine.task import AnyTask
+from sim_engine.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
-MAX_JOBS = 3
+MAX_JOBS = 100
 
 @dataclass()
 class SlurmSpec:
@@ -42,18 +42,18 @@ def parse_compound_number(s: str) -> list[int]:
 
 
 class Scheduler:
-    tasks: list[AnyTask]
+    tasks: list[Task]
     polling_period: float = 1.0
 
-    def __init__(self, tasks: Sequence[AnyTask] | None):
+    def __init__(self, tasks: Sequence[Task] | None):
         if tasks:
             self.tasks = list(tasks)
         else:
             self.tasks = []
         self.slurm = SlurmSpec()
 
-    def push_task(self, tasks: AnyTask | Iterable[AnyTask]):
-        if isinstance(tasks, AnyTask):
+    def push_task(self, tasks: Task | Iterable[Task]):
+        if isinstance(tasks, Task):
             self.tasks.append(tasks)
         else:
             self.tasks.extend(tasks)
@@ -100,8 +100,6 @@ class Scheduler:
             n_jobs += 1
 
     def check(self):
-        return
-        # TODO: TaskGenerators do not support asking for num_cpus right off the bat
         cpus = sum(self.slurm.cpus_per_node)
         for t in self.tasks:
             if t.num_cpus > cpus:
@@ -110,7 +108,7 @@ class Scheduler:
                 )
         # TODO: cyclic dependency checking
 
-    def next_task(self) -> AnyTask | None:
+    def next_task(self) -> Task | None:
         nt = None
         for t in self.tasks:
             if not t.pending:

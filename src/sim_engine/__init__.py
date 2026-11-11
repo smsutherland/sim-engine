@@ -1,4 +1,4 @@
 from .scheduler import Scheduler
-from .task import Task, TaskGenerator
+from .task import PyTask, Task
 
-__all__ = ["Scheduler", "Task", "TaskGenerator"]
+__all__ = ["PyTask", "Scheduler", "Task"]

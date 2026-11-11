@@ -3,14 +3,14 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from sim_engine.task import Task
+from sim_engine.task import AnyTask
 
 LOGGER = logging.getLogger(__name__)
 
-MAX_JOBS = 100
+MAX_JOBS = 3
 
 @dataclass()
 class SlurmSpec:
@@ -42,15 +42,18 @@ def parse_compound_number(s: str) -> list[int]:
 
 
 class Scheduler:
-    tasks: list[Task]
+    tasks: list[AnyTask]
     polling_period: float = 1.0
 
-    def __init__(self, tasks: list[Task] | None):
-        self.tasks = tasks or []
+    def __init__(self, tasks: Sequence[AnyTask] | None):
+        if tasks:
+            self.tasks = list(tasks)
+        else:
+            self.tasks = []
         self.slurm = SlurmSpec()
 
-    def push_task(self, tasks: Task | Iterable[Task]):
-        if isinstance(tasks, Task):
+    def push_task(self, tasks: AnyTask | Iterable[AnyTask]):
+        if isinstance(tasks, AnyTask):
             self.tasks.append(tasks)
         else:
             self.tasks.extend(tasks)
@@ -97,6 +100,8 @@ class Scheduler:
             n_jobs += 1
 
     def check(self):
+        return
+        # TODO: TaskGenerators do not support asking for num_cpus right off the bat
         cpus = sum(self.slurm.cpus_per_node)
         for t in self.tasks:
             if t.num_cpus > cpus:
@@ -105,7 +110,7 @@ class Scheduler:
                 )
         # TODO: cyclic dependency checking
 
-    def next_task(self) -> Task | None:
+    def next_task(self) -> AnyTask | None:
         nt = None
         for t in self.tasks:
             if not t.pending:
@@ -125,14 +130,14 @@ class Scheduler:
         cpus_dict = {}
         for t in self.tasks:
             if t.running:
-                assert t.ran_on is not None
-                for n in t.ran_on:
+                assert t.running_on is not None
+                for n in t.running_on:
                     if n not in cpus_dict:
                         cpus_dict[n] = 0
-                cpus_per_node = t.num_cpus // len(t.ran_on)
-                for n in t.ran_on:
+                cpus_per_node = t.num_cpus // len(t.running_on)
+                for n in t.running_on:
                     cpus_dict[n] += cpus_per_node
-                for n in t.ran_on[: t.num_cpus % len(t.ran_on)]:
+                for n in t.running_on[: t.num_cpus % len(t.running_on)]:
                     cpus_dict[n] += 1
 
         cpus = self.slurm.cpus_per_node.copy()

@@ -48,9 +48,9 @@ class Task:
         else:
             self.status = Status.Pending
 
-    def update_status(self):
+    def update_status(self, sched):
         for d in self.dependencies:
-            d.update_status()
+            d.update_status(sched)
         match self.status:
             case Status.Waiting:
                 if all(d.succeeded for d in self.dependencies):
@@ -167,6 +167,85 @@ class PyTask(Task):
         self.child = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
+        )
+        assert self.child.stdin is not None
+        cloudpickle.dump(self.pyfunc, self.child.stdin)
+        self.child.stdin.flush()
+        self.status = Status.Running
+        return self.child
+
+
+class TaskGenerator(Task):
+    pyfunc: T.Callable[[], Task]
+    buffered_stdout: bytes = b""
+
+    def __init__(
+        self,
+        job: T.Callable[[], Task],
+        cpus: int = 1,
+        dependencies: list[Task] | None = None,
+    ):
+        super().__init__(
+            [sys.executable, "-m", "sim_engine.runpy", "--return-task"],
+            cpus,
+            1,
+            dependencies,
+        )
+        self.pyfunc = job
+
+    def update_status(self, sched):
+        for d in self.dependencies:
+            d.update_status(sched)
+        match self.status:
+            case Status.Waiting:
+                if all(d.succeeded for d in self.dependencies):
+                    self.status = Status.Pending
+                elif any(d.failed or d.dep_failed for d in self.dependencies):
+                    self.status = Status.DepFailed
+
+            case Status.Running:
+                if self.child is None:
+                    raise RuntimeError(
+                        "Running task doesn't have an srun child process"
+                    )
+                assert self.child.stdout is not None
+                self.buffered_stdout += self.child.stdout.read(1024)
+                if (retval := self.child.poll()) is not None:
+                    if retval == 0:
+                        self.buffered_stdout += self.child.stdout.read()
+                        new_task = cloudpickle.loads(self.buffered_stdout)
+                        for t in sched.tasks:
+                            if self in t.dependencies:
+                                t.dependencies.append(new_task)
+                        sched.tasks.append(new_task)
+                        self.status = Status.Succeeded
+                    else:
+                        self.status = Status.Failed
+
+    def submit(self, workers: list[str]) -> subprocess.Popen:
+        workers = sorted(workers)
+        undone_deps = [d for d in self.dependencies if not d.succeeded]
+        if undone_deps:
+            raise RuntimeError(
+                f"Trying to submit task: {self} when the following tasks haven't completed:\n{undone_deps}"
+            )
+
+        cmd = [
+            "srun",
+            f"--ntasks={self.num_tasks}",
+            f"--cpus-per-task={self.cpus_per_task}",
+            "--nodelist=" + ",".join(workers),
+            "--exact",
+            "--cpu-bind=cores",
+            *self.job,
+        ]
+
+        LOGGER.debug(" ".join(cmd))
+        self.running_on = workers
+        self.child = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
         )
         assert self.child.stdin is not None
         cloudpickle.dump(self.pyfunc, self.child.stdin)

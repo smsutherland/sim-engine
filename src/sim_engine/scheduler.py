@@ -122,7 +122,7 @@ class Scheduler:
 
     def update_tasks(self):
         for t in self.tasks:
-            t.update_status()
+            t.update_status(self)
 
     def free_cpus(self) -> list[int]:
         cpus_dict = {}

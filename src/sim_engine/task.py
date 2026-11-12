@@ -35,6 +35,7 @@ class Task:
         cpus_per_task: int,
         num_tasks: int,
         dependencies: list[T.Self] | None = None,
+        priority: int = 0,
     ):
         if isinstance(job, str):
             self.job = shlex.split(job)
@@ -43,6 +44,7 @@ class Task:
         self.cpus_per_task = cpus_per_task
         self.num_tasks = num_tasks
         self.dependencies = dependencies or []
+        self.priority = priority
         if self.dependencies:
             self.status = Status.Waiting
         else:
@@ -138,9 +140,10 @@ class PyTask(Task):
         job: T.Callable[[], None],
         cpus: int = 1,
         dependencies: list[Task] | None = None,
+        priority: int = 0,
     ):
         super().__init__(
-            [sys.executable, "-m", "sim_engine.runpy"], cpus, 1, dependencies
+            [sys.executable, "-m", "sim_engine.runpy"], cpus, 1, dependencies, priority
         )
         self.pyfunc = job
 
@@ -184,12 +187,14 @@ class TaskGenerator(Task):
         job: T.Callable[[], Task],
         cpus: int = 1,
         dependencies: list[Task] | None = None,
+        priority: int = 0,
     ):
         super().__init__(
             [sys.executable, "-m", "sim_engine.runpy", "--return-task"],
             cpus,
             1,
             dependencies,
+            priority
         )
         self.pyfunc = job
 

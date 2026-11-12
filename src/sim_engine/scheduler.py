@@ -42,6 +42,7 @@ def parse_compound_number(s: str) -> list[int]:
 class Scheduler:
     tasks: list[Task]
     polling_period: float = 1.0
+    max_tasks: int = 100
 
     def __init__(self, tasks: Sequence[Task] | None):
         if tasks:
@@ -61,7 +62,7 @@ class Scheduler:
 
         n_jobs = 0
         had_task = False
-        while n_jobs < len(self.tasks):
+        while n_jobs < self.max_tasks:
             if not had_task:
                 # We sleep if the previous loop iteration didn't submit a task.
                 # If it did, we'll try again just in case we can submit another one right away.

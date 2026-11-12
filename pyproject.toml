@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Sagan Sutherland", email = "sagan.sutherland@uconn.edu" }]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "cloudpickle>=3.1.2",
 ]

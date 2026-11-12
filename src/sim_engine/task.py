@@ -1,4 +1,6 @@
+import re
 import copy
+import os
 import logging
 import shlex
 import subprocess
@@ -31,6 +33,7 @@ class Task:
     child: subprocess.Popen | None = None
     running_on: list[str] | None = None
     cwd: Path | None = None
+    modules: list[str]
 
     def __init__(
         self,
@@ -40,6 +43,7 @@ class Task:
         dependencies: list[T.Self] | None = None,
         priority: int = 0,
         cwd: str | Path | None = None,
+        modules: list[str] | None = None,
     ):
         if isinstance(job, str):
             self.job = shlex.split(job)
@@ -49,6 +53,7 @@ class Task:
         self.num_tasks = num_tasks
         self.dependencies = dependencies or []
         self.priority = priority
+        self.modules = modules or []
         if cwd is None:
             self.cwd = None
         else:
@@ -91,6 +96,27 @@ class Task:
             raise RuntimeError(
                 f"Trying to submit task: {self} when the following tasks haven't completed:\n{undone_deps}"
             )
+
+        if self.modules:
+            if (lmod := os.environ.get("LMOD_CMD", None)) is None:
+                raise RuntimeError("Trying to use modules with no $LMOD_CMD!")
+            result = subprocess.check_output(
+                [lmod, "bash", "load", *self.modules],
+                encoding="utf8",
+                stderr=subprocess.DEVNULL,
+            )
+            child_environ = (
+                popen_kwargs["env"].copy()
+                if "env" in popen_kwargs
+                else os.environ.copy()
+            )
+            vars = os.environ.copy()
+            for line in result.splitlines():
+                if match := re.match(r"(\w+)=(.*);", line):
+                    vars[match[1]] = match[2]
+                elif match := re.match(r"export (\w+);", line):
+                    child_environ[match[1]] = vars[match[1]]
+            popen_kwargs["env"] = child_environ
 
         cmd = [
             "srun",
@@ -158,6 +184,7 @@ class PyTask(Task):
         dependencies: list[Task] | None = None,
         priority: int = 0,
         cwd: str | Path | None = None,
+        modules: list[str] | None = None,
     ):
         super().__init__(
             [sys.executable, "-m", "sim_engine.runpy"],
@@ -166,6 +193,7 @@ class PyTask(Task):
             dependencies,
             priority,
             cwd,
+            modules,
         )
         self.pyfunc = job
 
@@ -194,6 +222,7 @@ class TaskGenerator(Task):
         dependencies: list[Task] | None = None,
         priority: int = 0,
         cwd: str | Path | None = None,
+        modules: list[str] | None = None,
     ):
         super().__init__(
             [sys.executable, "-m", "sim_engine.runpy", "--return-task"],
@@ -202,6 +231,7 @@ class TaskGenerator(Task):
             dependencies,
             priority,
             cwd,
+            modules,
         )
         self.pyfunc = job
 

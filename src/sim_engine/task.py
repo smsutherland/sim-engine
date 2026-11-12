@@ -1,9 +1,11 @@
+import copy
 import logging
 import shlex
 import subprocess
 import sys
 import typing as T
 from enum import Enum
+from pathlib import Path
 
 import cloudpickle
 
@@ -28,6 +30,7 @@ class Task:
     priority: int = 0
     child: subprocess.Popen | None = None
     running_on: list[str] | None = None
+    cwd: Path | None = None
 
     def __init__(
         self,
@@ -36,6 +39,7 @@ class Task:
         num_tasks: int,
         dependencies: list[T.Self] | None = None,
         priority: int = 0,
+        cwd: str | Path | None = None,
     ):
         if isinstance(job, str):
             self.job = shlex.split(job)
@@ -45,6 +49,10 @@ class Task:
         self.num_tasks = num_tasks
         self.dependencies = dependencies or []
         self.priority = priority
+        if cwd is None:
+            self.cwd = None
+        else:
+            self.cwd = Path(cwd)
         if self.dependencies:
             self.status = Status.Waiting
         else:
@@ -72,6 +80,11 @@ class Task:
                         self.status = Status.Failed
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
+        return self._submit(workers, {})
+
+    def _submit(
+        self, workers: list[str], popen_kwargs: dict[str, T.Any]
+    ) -> subprocess.Popen:
         workers = sorted(workers)
         undone_deps = [d for d in self.dependencies if not d.succeeded]
         if undone_deps:
@@ -89,9 +102,12 @@ class Task:
             *self.job,
         ]
 
+        if self.cwd is not None:
+            popen_kwargs["cwd"] = self.cwd
+
         LOGGER.debug(" ".join(cmd))
         self.running_on = workers
-        self.child = subprocess.Popen(cmd)
+        self.child = subprocess.Popen(cmd, **popen_kwargs)
         self.status = Status.Running
         return self.child
 
@@ -141,41 +157,30 @@ class PyTask(Task):
         cpus: int = 1,
         dependencies: list[Task] | None = None,
         priority: int = 0,
+        cwd: str | Path | None = None,
     ):
         super().__init__(
-            [sys.executable, "-m", "sim_engine.runpy"], cpus, 1, dependencies, priority
+            [sys.executable, "-m", "sim_engine.runpy"],
+            cpus,
+            1,
+            dependencies,
+            priority,
+            cwd,
         )
         self.pyfunc = job
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
-        workers = sorted(workers)
-        undone_deps = [d for d in self.dependencies if not d.succeeded]
-        if undone_deps:
-            raise RuntimeError(
-                f"Trying to submit task: {self} when the following tasks haven't completed:\n{undone_deps}"
-            )
-
-        cmd = [
-            "srun",
-            f"--ntasks={self.num_tasks}",
-            f"--cpus-per-task={self.cpus_per_task}",
-            "--nodelist=" + ",".join(workers),
-            "--exact",
-            "--cpu-bind=cores",
-            *self.job,
-        ]
-
-        LOGGER.debug(" ".join(cmd))
-        self.running_on = workers
-        self.child = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
+        child = self._submit(
+            workers,
+            {
+                "stdin": subprocess.PIPE,
+                "stdout": subprocess.PIPE,
+            },
         )
-        assert self.child.stdin is not None
-        cloudpickle.dump(self.pyfunc, self.child.stdin)
-        self.child.stdin.flush()
-        self.status = Status.Running
-        return self.child
+        assert child.stdin is not None
+        cloudpickle.dump(self.pyfunc, child.stdin)
+        child.stdin.flush()
+        return child
 
 
 class TaskGenerator(Task):
@@ -188,13 +193,15 @@ class TaskGenerator(Task):
         cpus: int = 1,
         dependencies: list[Task] | None = None,
         priority: int = 0,
+        cwd: str | Path | None = None,
     ):
         super().__init__(
             [sys.executable, "-m", "sim_engine.runpy", "--return-task"],
             cpus,
             1,
             dependencies,
-            priority
+            priority,
+            cwd,
         )
         self.pyfunc = job
 
@@ -228,32 +235,41 @@ class TaskGenerator(Task):
                         self.status = Status.Failed
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
-        workers = sorted(workers)
-        undone_deps = [d for d in self.dependencies if not d.succeeded]
-        if undone_deps:
-            raise RuntimeError(
-                f"Trying to submit task: {self} when the following tasks haven't completed:\n{undone_deps}"
-            )
-
-        cmd = [
-            "srun",
-            f"--ntasks={self.num_tasks}",
-            f"--cpus-per-task={self.cpus_per_task}",
-            "--nodelist=" + ",".join(workers),
-            "--exact",
-            "--cpu-bind=cores",
-            *self.job,
-        ]
-
-        LOGGER.debug(" ".join(cmd))
-        self.running_on = workers
-        self.child = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+        child = self._submit(
+            workers,
+            {
+                "stdin": subprocess.PIPE,
+                "stdout": subprocess.PIPE,
+            },
         )
-        assert self.child.stdin is not None
-        cloudpickle.dump(self.pyfunc, self.child.stdin)
-        self.child.stdin.flush()
-        self.status = Status.Running
-        return self.child
+        assert child.stdin is not None
+        cloudpickle.dump(self.pyfunc, child.stdin)
+        child.stdin.flush()
+        return child
+
+
+def clone_tasks(tasks: list[Task]) -> list[Task]:
+    dep_indices = []
+    for t in tasks:
+        di = []
+        for d in t.dependencies:
+            di.append(tasks.index(d))
+        dep_indices.append(di)
+
+    new_tasks = [copy.copy(t) for t in tasks]
+    for t, di in zip(new_tasks, dep_indices):
+        t.dependencies = [new_tasks[i] for i in di]
+    return new_tasks
+
+
+def multiply(tasks: list[Task], paths: list[Path]) -> list[Task]:
+    new_tasks = []
+    for p in paths:
+        tasks_copy = clone_tasks(tasks)
+        for t in tasks_copy:
+            if t.cwd is not None:
+                t.cwd = p / t.cwd
+            else:
+                t.cwd = p
+        new_tasks.extend(tasks_copy)
+    return new_tasks

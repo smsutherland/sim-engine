@@ -303,3 +303,9 @@ def multiply(tasks: list[Task], paths: list[Path]) -> list[Task]:
                 t.cwd = p
         new_tasks.extend(tasks_copy)
     return new_tasks
+
+
+def series(tasks: list[Task]) -> list[Task]:
+    for i, t in enumerate(tasks[1:]):
+        t.dependencies.append(tasks[i])
+    return tasks

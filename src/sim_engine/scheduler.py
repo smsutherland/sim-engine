@@ -10,8 +10,6 @@ from sim_engine.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
-MAX_JOBS = 100
-
 @dataclass()
 class SlurmSpec:
     cpus_per_node: list[int]
@@ -62,13 +60,12 @@ class Scheduler:
         self.check()
 
         n_jobs = 0
-        had_task = True
-        while n_jobs < MAX_JOBS:
+        had_task = False
+        while n_jobs < len(self.tasks):
             if not had_task:
                 # We sleep if the previous loop iteration didn't submit a task.
                 # If it did, we'll try again just in case we can submit another one right away.
                 time.sleep(self.polling_period)
-            had_task = False
 
             self.update_tasks()
             if self.done():
@@ -78,7 +75,9 @@ class Scheduler:
 
             next_task = self.next_task()
             if next_task is None:
-                LOGGER.debug("No tasks can run. Sleeping")
+                if had_task:
+                    LOGGER.debug("No tasks can run. Sleeping")
+                had_task = False
                 continue
 
             needed_free_cpus = next_task.num_cpus
@@ -88,7 +87,9 @@ class Scheduler:
 
             free_cpus_on_right_node_count = sum(sorted(free_cpus)[:needed_nodes])
             if free_cpus_on_right_node_count < needed_free_cpus:
-                LOGGER.debug("Waiting for space. Sleeping.")
+                if had_task:
+                    LOGGER.debug("Waiting for space. Sleeping.")
+                had_task = False
                 continue
 
             nodes_to_run_on = argsort(free_cpus)[:needed_nodes]
@@ -98,6 +99,10 @@ class Scheduler:
             next_task.submit(hostnames_to_run_on)
             had_task = True
             n_jobs += 1
+
+        LOGGER.info("All tasks have been started. Waiting for them to finish")
+        while not self.done():
+            time.sleep(self.polling_period * 4)
 
     def check(self):
         cpus = sum(self.slurm.cpus_per_node)

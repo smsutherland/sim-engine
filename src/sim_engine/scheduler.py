@@ -102,6 +102,7 @@ class Scheduler:
 
         LOGGER.info("All tasks have been started. Waiting for them to finish")
         while not self.done():
+            self.update_tasks()
             time.sleep(self.polling_period * 4)
 
     def check(self):

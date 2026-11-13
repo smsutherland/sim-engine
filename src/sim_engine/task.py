@@ -52,7 +52,7 @@ class Task:
     job: list[str]
     cpus_per_task: int
     num_tasks: int
-    dependencies: list[T.Self]
+    dependencies: "list[Task]"
     status: Status
     priority: int = 0
     child: subprocess.Popen | None = None
@@ -65,7 +65,7 @@ class Task:
         job: str | list[str],
         cpus_per_task: int,
         num_tasks: int,
-        dependencies: list[T.Self] | None = None,
+        dependencies: "list[Task] | None" = None,
         priority: int = 0,
         cwd: str | Path | None = None,
         modules: list[str] | None = None,
@@ -174,6 +174,14 @@ class Task:
         self.child = subprocess.Popen(cmd, **popen_kwargs)
         self.status = Status.Running
         return self.child
+
+    def add_deps(self, new_deps: "Task | list[Task]"):
+        if isinstance(new_deps, Task):
+            self.dependencies.append(new_deps)
+        else:
+            self.dependencies.extend(new_deps)
+        if self.status == Status.Pending:
+            self.status = Status.Waiting
 
     @property
     def num_cpus(self) -> int:

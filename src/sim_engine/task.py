@@ -24,6 +24,31 @@ class Status(Enum):
 
 
 class Task:
+    """A task to be executed by srun within a slurm job allocation.
+
+    Note that the word "task" gets used to represent a single task within the scheduler,
+    as well as individual processes of an MPI-parallelized program.
+
+    Parameters
+    ----------
+    job: str | list[str]
+        If a list, the program to execute and arguments to provide to it
+        If a str, the command-line for the task to execute. Will be split using shlex.
+    cpus_per_task: int
+        How many CPUs to allocate for each MPI task.
+    num_tasks: int
+        How many MPI tasks to allocate to the job step.
+    dependencies: list[Task] | None
+        What tasks must run and succeed before this task runs.
+    priority: int
+        Priority of the task.
+        Higher priority tasks will run before lower priority ones, if they are able.
+    cwd: str | Path | None
+        Directory to run the task inside. If None, task will run in the same working directory as the host Python process.
+    modules: list[str] | None
+        Lmod modules to load prior to executing the task.
+    """
+
     job: list[str]
     cpus_per_task: int
     num_tasks: int
@@ -63,9 +88,9 @@ class Task:
         else:
             self.status = Status.Pending
 
-    def update_status(self, sched):
+    def _update_status(self, sched):
         for d in self.dependencies:
-            d.update_status(sched)
+            d._update_status(sched)
         match self.status:
             case Status.Waiting:
                 if all(d.succeeded for d in self.dependencies):
@@ -85,6 +110,18 @@ class Task:
                         self.status = Status.Failed
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
+        """Tell slurm to execute the task on the given nodes.
+
+        Parameters
+        ----------
+        workers: list[str]
+            Names of the nodes to run the task on.
+
+        Returns
+        -------
+        srun
+            Handle to the `srun` process spawned.
+        """
         return self._submit(workers, {})
 
     def _submit(
@@ -140,42 +177,74 @@ class Task:
 
     @property
     def num_cpus(self) -> int:
+        """Number of CPUs required for this task."""
         return self.cpus_per_task * self.num_tasks
 
     @property
     def waiting(self) -> bool:
+        """Is the task waiting on its dependencies to run."""
         return self.status == Status.Waiting
 
     @property
     def pending(self) -> bool:
+        """Is the task waiting to be submitted. Dependencies must have finished."""
         return self.status == Status.Pending
 
     @property
     def running(self) -> bool:
+        """Is the task currently running."""
         return self.status == Status.Running
 
     @property
     def succeeded(self) -> bool:
+        """Did the task finish running successfully."""
         return self.status == Status.Succeeded
 
     @property
     def failed(self) -> bool:
+        """Did the task finish running with a non-zero exit code."""
         return self.status == Status.Failed
 
     @property
     def finished(self) -> bool:
+        """Did the task finish running, regardless of success or failure"""
         return self.succeeded or self.failed
 
     @property
     def dep_failed(self) -> bool:
+        """Did one the task's dependencies fail"""
         return self.status == Status.DepFailed
 
     @property
     def done(self) -> bool:
+        """Is the task done, whether because it has already run or because a dependency failed and it will never run."""
         return self.finished or self.dep_failed
 
 
 class PyTask(Task):
+    """A python function to be executed as a task within a slurm job allocation.
+
+    Currently MPI parallelized PyTasks are not supported.
+    Support is planned.
+
+    Parameters
+    ----------
+    job: str | list[str]
+        If a list, the program to execute and arguments to provide to it
+        If a str, the command-line for the task to execute. Will be split using shlex.
+    cpus: int
+        How many CPUs to allocate for each MPI task.
+    dependencies: list[Task] | None
+        What tasks must run and succeed before this task runs.
+    priority: int
+        Priority of the task.
+        Higher priority tasks will run before lower priority ones, if they are able.
+    cwd: str | Path | None
+        Directory to run the task inside. If None, task will run in the same working directory as the host Python process.
+    modules: list[str] | None
+        Lmod modules to load prior to executing the task.
+    """
+
     pyfunc: T.Callable[[], None]
 
     def __init__(
@@ -199,6 +268,18 @@ class PyTask(Task):
         self.pyfunc = job
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
+        """Tell slurm to execute the task on the given nodes.
+
+        Parameters
+        ----------
+        workers: list[str]
+            Names of the nodes to run the task on.
+
+        Returns
+        -------
+        srun
+            Handle to the `srun` process spawned.
+        """
         child = self._submit(
             workers,
             {
@@ -213,6 +294,32 @@ class PyTask(Task):
 
 
 class TaskGenerator(Task):
+    """A python function to be executed as a task within a slurm job allocation.
+
+    The function should return a new Task (or one of its subclasses) to be executed.
+    Any tasks that depend on this TaskGenerator will also depend on the returned task.
+
+    Currently MPI parallelized TaskGenerator are not supported.
+    Support is not planned.
+
+    Parameters
+    ----------
+    job: str | list[str]
+        If a list, the program to execute and arguments to provide to it
+        If a str, the command-line for the task to execute. Will be split using shlex.
+    cpus: int
+        How many CPUs to allocate for each MPI task.
+    dependencies: list[Task] | None
+        What tasks must run and succeed before this task runs.
+    priority: int
+        Priority of the task.
+        Higher priority tasks will run before lower priority ones, if they are able.
+    cwd: str | Path | None
+        Directory to run the task inside. If None, task will run in the same working directory as the host Python process.
+    modules: list[str] | None
+        Lmod modules to load prior to executing the task.
+    """
+
     pyfunc: T.Callable[[], Task]
     buffered_stdout: bytes = b""
 
@@ -236,9 +343,9 @@ class TaskGenerator(Task):
         )
         self.pyfunc = job
 
-    def update_status(self, sched):
+    def _update_status(self, sched):
         for d in self.dependencies:
-            d.update_status(sched)
+            d._update_status(sched)
         match self.status:
             case Status.Waiting:
                 if all(d.succeeded for d in self.dependencies):
@@ -266,6 +373,18 @@ class TaskGenerator(Task):
                         self.status = Status.Failed
 
     def submit(self, workers: list[str]) -> subprocess.Popen:
+        """Tell slurm to execute the task on the given nodes.
+
+        Parameters
+        ----------
+        workers: list[str]
+            Names of the nodes to run the task on.
+
+        Returns
+        -------
+        srun
+            Handle to the `srun` process spawned.
+        """
         child = self._submit(
             workers,
             {
@@ -280,6 +399,20 @@ class TaskGenerator(Task):
 
 
 def clone(tasks: list[Task]) -> list[Task]:
+    """Creates a copy of the given list of tasks, keeping task dependencies isolated from the original copy.
+
+    Will raise an exception if any task provided depends on a task not in the list.
+
+    Parameters
+    ----------
+    tasks: list[Task]
+        Tasks to clone.
+
+    Returns
+    -------
+    tasks: list[Task]
+        A copy of all the tasks.
+    """
     dep_indices = []
     for t in tasks:
         di = []
@@ -294,6 +427,22 @@ def clone(tasks: list[Task]) -> list[Task]:
 
 
 def multiply(tasks: list[Task], paths: list[Path]) -> list[Task]:
+    """Create multiple clones of the provided task list, each executing in one of the provided paths.
+
+    If a task already has a cwd set, then the cwd will be changed to be relative to each path.
+    If the cwd is an absolute path, then it will not be modified.
+
+    Parameters
+    ----------
+    tasks: list[Task]
+        Tasks to multiply.
+    paths: list[Path]
+        Paths to run the set of tasks within.
+
+    Returns
+    -------
+    tasks: list[Task]
+    """
     new_tasks = []
     for p in paths:
         tasks_copy = clone(tasks)
@@ -307,6 +456,20 @@ def multiply(tasks: list[Task], paths: list[Path]) -> list[Task]:
 
 
 def series(tasks: list[Task]) -> list[Task]:
+    """Make each task in a list depend on the previous.
+
+    Modifications happen in-place and a reference to the task list is returned for convenience.
+
+    Parameters
+    ----------
+    tasks: list[Task]
+        Series of tasks to make depend on each other.
+
+    Returns
+    -------
+    tasks: list[Task]
+        Identical to the supplied task list.
+    """
     for i, t in enumerate(tasks[1:]):
         t.dependencies.append(tasks[i])
     return tasks

@@ -10,24 +10,35 @@ from sim_engine.task import Task
 
 LOGGER = logging.getLogger(__name__)
 
+
 @dataclass()
 class SlurmSpec:
+    """A description of which nodes are available and the cpu count for each one.
+
+    Automatically retreives the configuration for the current slurm allocation upon instantiation.
+
+    Attributes
+    ----------
     cpus_per_node: list[int]
-    tasks_per_node: list[int]
+        How many CPUs are on each allocated node
+    hostnames: list[str]
+        Name of each node allocated to the job
+    """
+
+    cpus_per_node: list[int]
     hostnames: list[str]
 
     def __init__(self):
-        self.cpus_per_node = parse_compound_number(
+        self.cpus_per_node = _parse_compound_number(
             os.environ["SLURM_JOB_CPUS_PER_NODE"]
         )
-        self.tasks_per_node = parse_compound_number(os.environ["SLURM_TASKS_PER_NODE"])
 
         self.hostnames = subprocess.check_output(
             ["scontrol", "show", "hostnames"], universal_newlines=True
         ).splitlines()
 
 
-def parse_compound_number(s: str) -> list[int]:
+def _parse_compound_number(s: str) -> list[int]:
     r = []
 
     matches = re.findall(r"(\d+)(?:\(x(\d+)\))?", s)
@@ -40,6 +51,14 @@ def parse_compound_number(s: str) -> list[int]:
 
 
 class Scheduler:
+    """Manages and executes a set of tasks provided to it within a slurm job allocation.
+
+    Parameters
+    ----------
+    tasks: Sequence[Task] | None
+        The initial set of tasks which will be managed by this Scheduler
+    """
+
     tasks: list[Task]
     polling_period: float = 1.0
     max_tasks: int = 100
@@ -52,13 +71,22 @@ class Scheduler:
         self.slurm = SlurmSpec()
 
     def push_task(self, tasks: Task | Iterable[Task]):
+        """Add a task or tasks to the current list kept by the Scheduler
+
+        Parameters
+        ----------
+        tasks: Task | Iterable[Task]
+            The task or tasks to add to the Scheduler
+        """
         if isinstance(tasks, Task):
             self.tasks.append(tasks)
         else:
             self.tasks.extend(tasks)
 
     def run(self):
-        self.check()
+        """Start running the Scheduler's tasks
+        """
+        self._check()
 
         n_jobs = 0
         had_task = False
@@ -68,13 +96,13 @@ class Scheduler:
                 # If it did, we'll try again just in case we can submit another one right away.
                 time.sleep(self.polling_period)
 
-            self.update_tasks()
-            if self.done():
+            self._update_tasks()
+            if self._done():
                 break
 
-            free_cpus = self.free_cpus()
+            free_cpus = self._free_cpus()
 
-            next_task = self.next_task()
+            next_task = self._next_task()
             if next_task is None:
                 if had_task:
                     LOGGER.debug("No tasks can run. Sleeping")
@@ -82,7 +110,7 @@ class Scheduler:
                 continue
 
             needed_free_cpus = next_task.num_cpus
-            needed_nodes = minimum_nodes_needed(
+            needed_nodes = _minimum_nodes_needed(
                 needed_free_cpus, self.slurm.cpus_per_node
             )
 
@@ -93,7 +121,7 @@ class Scheduler:
                 had_task = False
                 continue
 
-            nodes_to_run_on = argsort(free_cpus)[:needed_nodes]
+            nodes_to_run_on = _argsort(free_cpus)[:needed_nodes]
             hostnames_to_run_on = [self.slurm.hostnames[i] for i in nodes_to_run_on]
 
             LOGGER.info(f"Starting task {next_task} on nodes {hostnames_to_run_on}")
@@ -102,11 +130,11 @@ class Scheduler:
             n_jobs += 1
 
         LOGGER.info("All tasks have been started. Waiting for them to finish")
-        while not self.done():
-            self.update_tasks()
+        while not self._done():
+            self._update_tasks()
             time.sleep(self.polling_period * 4)
 
-    def check(self):
+    def _check(self):
         cpus = sum(self.slurm.cpus_per_node)
         for t in self.tasks:
             if t.num_cpus > cpus:
@@ -115,7 +143,7 @@ class Scheduler:
                 )
         # TODO: cyclic dependency checking
 
-    def next_task(self) -> Task | None:
+    def _next_task(self) -> Task | None:
         nt = None
         for t in self.tasks:
             if not t.pending:
@@ -127,11 +155,11 @@ class Scheduler:
                 nt = t
         return nt
 
-    def update_tasks(self):
+    def _update_tasks(self):
         for t in self.tasks:
-            t.update_status(self)
+            t._update_status(self)
 
-    def free_cpus(self) -> list[int]:
+    def _free_cpus(self) -> list[int]:
         cpus_dict = {}
         for t in self.tasks:
             if t.running:
@@ -151,11 +179,11 @@ class Scheduler:
                 cpus[i] -= cpus_dict[n]
         return cpus
 
-    def done(self) -> bool:
+    def _done(self) -> bool:
         return all(t.done for t in self.tasks)
 
 
-def minimum_nodes_needed(cpus: int, node_size: list[int]) -> int:
+def _minimum_nodes_needed(cpus: int, node_size: list[int]) -> int:
     node_size = sorted(node_size)
     i = 1
     while sum(node_size[:i]) < cpus:
@@ -163,5 +191,5 @@ def minimum_nodes_needed(cpus: int, node_size: list[int]) -> int:
     return i
 
 
-def argsort(l: list[int]) -> list[int]:
+def _argsort(l: list[int]) -> list[int]:
     return sorted(range(len(l)), key=l.__getitem__)

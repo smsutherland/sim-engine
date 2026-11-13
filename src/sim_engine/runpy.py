@@ -1,3 +1,9 @@
+"""
+Module to facilitate the execution of python-based tasks.
+
+Reads a pickle-serialized function from stdin and executes it.
+If the `--return-task` flag is provided, writes the return value from the function to stdout, serialized with pickle.
+"""
 import sys
 
 import cloudpickle

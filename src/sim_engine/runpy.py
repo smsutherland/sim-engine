@@ -1,11 +1,9 @@
 import sys
-import time
 
 import cloudpickle
 
 
 def main():
-    time.sleep(3)
     func = cloudpickle.load(sys.stdin.buffer)
     sys.stdin.close()
     task = func()

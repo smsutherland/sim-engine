@@ -1,7 +1,7 @@
 [project]
 name = "sim-engine"
 version = "0.1.0"
-description = "Add your description here"
+description = "Slurm-based task scheduler"
 readme = "README.md"
 authors = [{ name = "Sagan Sutherland", email = "sagan.sutherland@uconn.edu" }]
 requires-python = ">=3.11"

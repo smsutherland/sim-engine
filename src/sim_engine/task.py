@@ -278,7 +278,7 @@ class TaskGenerator(Task):
         return child
 
 
-def clone_tasks(tasks: list[Task]) -> list[Task]:
+def clone(tasks: list[Task]) -> list[Task]:
     dep_indices = []
     for t in tasks:
         di = []
@@ -295,7 +295,7 @@ def clone_tasks(tasks: list[Task]) -> list[Task]:
 def multiply(tasks: list[Task], paths: list[Path]) -> list[Task]:
     new_tasks = []
     for p in paths:
-        tasks_copy = clone_tasks(tasks)
+        tasks_copy = clone(tasks)
         for t in tasks_copy:
             if t.cwd is not None:
                 t.cwd = p / t.cwd

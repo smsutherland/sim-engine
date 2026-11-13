@@ -1,12 +1,12 @@
 from .scheduler import Scheduler
-from .task import PyTask, Task, TaskGenerator, clone_tasks, multiply, series
+from .task import PyTask, Task, TaskGenerator, clone, multiply, series
 
 __all__ = [
     "PyTask",
     "Scheduler",
     "Task",
     "TaskGenerator",
-    "clone_tasks",
+    "clone",
     "multiply",
     "series",
 ]

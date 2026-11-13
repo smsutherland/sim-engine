@@ -220,6 +220,9 @@ class Task:
         """Is the task done, whether because it has already run or because a dependency failed and it will never run."""
         return self.finished or self.dep_failed
 
+    def __str__(self) -> str:
+        return f"Task({' '.join(self.job)})"
+
 
 class PyTask(Task):
     """A python function to be executed as a task within a slurm job allocation.

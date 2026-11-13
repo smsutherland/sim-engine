@@ -125,6 +125,7 @@ class Task:
             "--nodelist=" + ",".join(workers),
             "--exact",
             "--cpu-bind=cores",
+            "--",
             *self.job,
         ]
 

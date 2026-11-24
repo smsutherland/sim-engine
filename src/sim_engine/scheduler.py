@@ -293,6 +293,8 @@ class Scheduler:
                     modules,
                 )
                 task.status = Status(status_value)
+                if task.status == Status.Running:
+                    task.status = Status.Pending
                 tasks.append(task)
             deps.append(dep_indices)
 

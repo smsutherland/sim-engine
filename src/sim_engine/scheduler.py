@@ -29,13 +29,17 @@ class SlurmSpec:
     hostnames: list[str]
 
     def __init__(self):
-        self.cpus_per_node = _parse_compound_number(
-            os.environ["SLURM_JOB_CPUS_PER_NODE"]
-        )
+        try:
+            self.cpus_per_node = _parse_compound_number(
+                os.environ["SLURM_JOB_CPUS_PER_NODE"]
+            )
 
-        self.hostnames = subprocess.check_output(
-            ["scontrol", "show", "hostnames"], universal_newlines=True
-        ).splitlines()
+            self.hostnames = subprocess.check_output(
+                ["scontrol", "show", "hostnames"], universal_newlines=True
+            ).splitlines()
+        except KeyError as e:
+            e.add_note("We don't appear to be inside a slurm job!")
+            raise
 
 
 def _parse_compound_number(s: str) -> list[int]:

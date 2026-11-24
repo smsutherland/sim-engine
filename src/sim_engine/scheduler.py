@@ -1,12 +1,19 @@
+import base64
+import json
 import logging
 import os
 import re
 import subprocess
 import time
+import typing as T
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TextIO
 
-from sim_engine.task import Task
+import cloudpickle
+
+from sim_engine.task import PyTask, Status, Task, TaskGenerator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,8 +95,7 @@ class Scheduler:
             self.tasks.extend(tasks)
 
     def run(self):
-        """Start running the Scheduler's tasks
-        """
+        """Start running the Scheduler's tasks"""
         self._check()
 
         n_jobs = 0
@@ -185,6 +191,115 @@ class Scheduler:
 
     def _done(self) -> bool:
         return all(t.done for t in self.tasks)
+
+    def save(self, file: TextIO | Path | str):
+        if isinstance(file, Path | str):
+            with open(file) as f:
+                self._save(f)
+        else:
+            self._save(file)
+
+    def _save(self, f: TextIO):
+        for t in self.tasks:
+            if isinstance(t, TaskGenerator):
+                kind = 2
+            elif isinstance(t, PyTask):
+                kind = 1
+            elif isinstance(t, Task):
+                kind = 0
+            if isinstance(t, TaskGenerator | PyTask):
+                func: bytes = cloudpickle.dumps(t.pyfunc)
+                job = base64.b64encode(func).decode()
+            else:
+                job = t.job
+            dep_indices = [self.tasks.index(d) for d in t.dependencies]
+            json.dump(
+                (
+                    kind,
+                    job,
+                    t.cpus_per_task,
+                    t.num_tasks,
+                    t.status.value,
+                    t.priority,
+                    t.modules,
+                    t.cwd,
+                    dep_indices,
+                ),
+                f,
+                separators=(",", ":"),
+            )
+            f.write("\n")
+
+    @classmethod
+    def load(cls, file: TextIO | Path | str) -> T.Self:
+        if isinstance(file, Path | str):
+            with open(file) as f:
+                return cls._load(f)
+        else:
+            return cls._load(file)
+
+    @classmethod
+    def _load(cls, f: TextIO) -> T.Self:
+        tasks = []
+        deps = []
+        for line in f:
+            parsed: tuple[
+                int,
+                str | list[str],
+                int,
+                int,
+                int,
+                int,
+                list[str],
+                str | None,
+                list[int],
+            ] = json.loads(line)
+            (
+                kind,
+                job,
+                cpus_per_task,
+                num_tasks,
+                status_value,
+                priority,
+                modules,
+                cwd,
+                dep_indices,
+            ) = parsed
+
+            if kind == 0:
+                task = Task(job, cpus_per_task, num_tasks, [], priority, cwd, modules)
+                task.status = Status(status_value)
+                tasks.append(task)
+            elif kind == 1:
+                assert isinstance(job, str)
+                task = PyTask(
+                    cloudpickle.loads(base64.b64decode(job.encode())),
+                    cpus_per_task,
+                    [],
+                    priority,
+                    cwd,
+                    modules,
+                )
+                task.status = Status(status_value)
+                tasks.append(task)
+            elif kind == 2:
+                assert isinstance(job, str)
+                task = TaskGenerator(
+                    cloudpickle.loads(base64.b64decode(job.encode())),
+                    cpus_per_task,
+                    [],
+                    priority,
+                    cwd,
+                    modules,
+                )
+                task.status = Status(status_value)
+                tasks.append(task)
+            deps.append(dep_indices)
+
+        # Reconstruct dependencies
+        for t, d in zip(tasks, deps):
+            t.dependencies = [tasks[i] for i in d]
+        return cls(tasks)
 
 
 def _minimum_nodes_needed(cpus: int, node_size: list[int]) -> int:
